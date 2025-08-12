@@ -71,10 +71,165 @@ class ESP32Client {
     );
   }
 
-  /// NEW: Connect using native network binding + login
+  /// ✨ UPDATED: Platform-aware connection method
   Future<bool> connectAndLoginNative() async {
+    if (Platform.isIOS) {
+      print('🍎 iOS: Using direct HTTP connection method...');
+      return await _connectIOS();
+    } else if (Platform.isAndroid) {
+      print('🤖 Android: Using native network binding method...');
+      return await _connectAndroid();
+    } else {
+      print('❌ Unsupported platform');
+      return false;
+    }
+  }
+
+  /// ✨ NEW: iOS-specific connection method
+  Future<bool> _connectIOS() async {
     try {
-      print('🔍 Connecting to ESP32 via native network binding...');
+      print('🔍 iOS: Attempting direct HTTP connection to ESP32...');
+
+      baseUrl = 'http://$ESP32_DEFAULT_IP';
+      _initializeDio();
+
+      // Test direct connectivity to ESP32
+      print('🔌 iOS: Testing ESP32 reachability...');
+
+      try {
+        final response = await _dio!
+            .get('/login')
+            .timeout(Duration(seconds: 8));
+        print('✅ iOS: ESP32 reachable, status: ${response.statusCode}');
+
+        if (response.statusCode == 200) {
+          // ESP32 is reachable, proceed with login
+          print('🔐 iOS: Proceeding with login...');
+          final loginSuccess = await _loginToESP32iOS();
+
+          if (loginSuccess) {
+            isConnected = true;
+            print('🎉 iOS: Successfully connected and logged in to ESP32!');
+            return true;
+          } else {
+            print('❌ iOS: Login failed');
+            return false;
+          }
+        }
+      } on DioException catch (e) {
+        if (e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout) {
+          print('❌ iOS: ESP32 not reachable - connection timeout');
+          print(
+            '💡 iOS: Make sure you are connected to ESP32 WiFi network manually',
+          );
+        } else {
+          print('❌ iOS: Connection error: ${e.message}');
+        }
+        return false;
+      } catch (e) {
+        print('❌ iOS: Unexpected error: $e');
+        return false;
+      }
+
+      return false;
+    } catch (e) {
+      print('❌ iOS: Connection error: $e');
+      return false;
+    }
+  }
+
+  /// ✨ NEW: iOS login method using Dio
+  Future<bool> _loginToESP32iOS() async {
+    try {
+      // First, get the login page to extract any CSRF token
+      print('🔍 iOS: Getting login page...');
+      final loginPageResponse = await _dio!.get('/login');
+
+      String? csrfToken;
+      if (loginPageResponse.statusCode == 200) {
+        final html = loginPageResponse.data.toString();
+        csrfToken = _extractCSRFToken(html);
+        if (csrfToken != null) {
+          print('🔍 iOS: Found CSRF token: ${csrfToken.substring(0, 10)}...');
+        }
+      }
+
+      // Prepare login data
+      final loginData = {
+        'username': ESP32_USERNAME,
+        'password': ESP32_PASSWORD,
+      };
+
+      if (csrfToken != null) {
+        loginData['_token'] = csrfToken;
+      }
+
+      print('🔐 iOS: Attempting login...');
+
+      // Perform login using form data
+      final response = await _dio!.post(
+        '/login',
+        data: loginData,
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          followRedirects: false,
+          validateStatus: (status) => status! < 400, // Accept redirects
+        ),
+      );
+
+      print('🔍 iOS: Login response status: ${response.statusCode}');
+
+      // Check for successful login
+      if (response.statusCode == 302 || response.statusCode == 200) {
+        // Extract session cookie from response
+        final cookies = response.headers['set-cookie'];
+        if (cookies != null && cookies.isNotEmpty) {
+          // Find session cookie
+          for (final cookie in cookies) {
+            if (cookie.contains('session') ||
+                cookie.contains('PHPSESSID') ||
+                cookie.contains('SESSION')) {
+              sessionCookie = cookie.split(';')[0];
+              final cookiePreview = sessionCookie!.length > 30
+                  ? '${sessionCookie!.substring(0, 30)}...'
+                  : sessionCookie!;
+              print('✅ iOS: Session cookie extracted: $cookiePreview');
+
+              // Re-initialize Dio with session cookie
+              _initializeDio();
+              return true;
+            }
+          }
+
+          // If no specific session cookie found, use first one
+          sessionCookie = cookies.first.split(';')[0];
+          final cookiePreview = sessionCookie!.length > 30
+              ? '${sessionCookie!.substring(0, 30)}...'
+              : sessionCookie!;
+          print('✅ iOS: Using first cookie as session: $cookiePreview');
+
+          // Re-initialize Dio with session cookie
+          _initializeDio();
+          return true;
+        } else if (response.statusCode == 302) {
+          print('✅ iOS: Login successful (redirect without explicit cookie)');
+          return true;
+        }
+      }
+
+      print('❌ iOS: Login failed - no session cookie received');
+      return false;
+    } catch (e) {
+      print('❌ iOS: Login error: $e');
+      return false;
+    }
+  }
+
+  /// ✨ EXISTING: Android connection method (unchanged)
+  Future<bool> _connectAndroid() async {
+    try {
+      print('🔍 Android: Connecting via native network binding...');
 
       // Step 1: Native network binding
       final networkOk = await EspNetworkAndroid.connect(
@@ -84,7 +239,7 @@ class ESP32Client {
       );
 
       if (!networkOk) {
-        print('❌ Failed to bind to ESP32 network');
+        print('❌ Android: Failed to bind to ESP32 network');
         return false;
       }
 
@@ -98,25 +253,25 @@ class ESP32Client {
       await Future.delayed(Duration(milliseconds: 800));
 
       // Step 3: Test connectivity
-      print('🔌 Testing socket connectivity...');
+      print('🔌 Android: Testing socket connectivity...');
       final socketOk = await EspNetworkAndroid.rawSocketTest(
         ESP32_DEFAULT_IP,
         80,
       );
       if (!socketOk) {
-        print('❌ Cannot reach ESP32 via socket');
+        print('❌ Android: Cannot reach ESP32 via socket');
         return false;
       }
 
       // Step 4: Test login page first
-      print('🔍 Testing login page accessibility...');
+      print('🔍 Android: Testing login page accessibility...');
       final loginPageResponse = _safeCastMap(
         await EspNetworkAndroid.httpGet('$baseUrl/login'),
       );
-      print('🔍 Login page response: ${loginPageResponse['code']}');
+      print('🔍 Android: Login page response: ${loginPageResponse['code']}');
 
       if (loginPageResponse['code'] != 200) {
-        print('❌ Cannot access login page');
+        print('❌ Android: Cannot access login page');
         return false;
       }
 
@@ -124,14 +279,14 @@ class ESP32Client {
       final loginPageBody = loginPageResponse['body']?.toString() ?? '';
       String? csrfToken = _extractCSRFToken(loginPageBody);
       if (csrfToken != null) {
-        print('🔍 Found CSRF token: ${csrfToken.substring(0, 10)}...');
+        print('🔍 Android: Found CSRF token: ${csrfToken.substring(0, 10)}...');
       }
 
       // Step 6: Login via native HTTP
-      print('🔐 Logging in to ESP32...');
+      print('🔐 Android: Logging in to ESP32...');
       final loginSuccess = await _loginToESP32Native(csrfToken: csrfToken);
       if (!loginSuccess) {
-        print('❌ Login failed');
+        print('❌ Android: Login failed');
         return false;
       }
 
@@ -139,10 +294,10 @@ class ESP32Client {
       _initializeDio();
 
       isConnected = true;
-      print('🎉 Successfully connected and logged in to ESP32!');
+      print('🎉 Android: Successfully connected and logged in to ESP32!');
       return true;
     } catch (e) {
-      print('❌ Connection error: $e');
+      print('❌ Android: Connection error: $e');
       return false;
     }
   }
@@ -168,7 +323,7 @@ class ESP32Client {
     return null;
   }
 
-  /// Login via native HTTP (using bound network)
+  /// Login via native HTTP (using bound network) - Android only
   Future<bool> _loginToESP32Native({String? csrfToken}) async {
     try {
       // ✅ Use lowercase field names to match ESP32ApiService
@@ -179,26 +334,26 @@ class ESP32Client {
         loginData += '&_token=$csrfToken';
       }
 
-      print('🔐 Attempting login with proper form encoding...');
-      print('🔍 Login data: $loginData');
+      print('🔐 Android: Attempting login with proper form encoding...');
+      print('🔍 Android: Login data: $loginData');
 
       // Use URL-encoded form data with FormBody (like working Dio code)
       var response = _safeCastMap(
         await EspNetworkAndroid.httpPostFormData('$baseUrl/login', loginData),
       );
 
-      print('🔍 Login response: ${response['code']}');
-      print('🔍 Response headers: ${response['headers']}');
+      print('🔍 Android: Login response: ${response['code']}');
+      print('🔍 Android: Response headers: ${response['headers']}');
 
       // Check for successful login (redirect or cookie)
       if (await _checkLoginSuccess(response)) {
         return true;
       }
 
-      print('❌ Login failed with proper form encoding');
+      print('❌ Android: Login failed with proper form encoding');
       return false;
     } catch (e) {
-      print('❌ Login error: $e');
+      print('❌ Android: Login error: $e');
       return false;
     }
   }
@@ -290,7 +445,7 @@ class ESP32Client {
     return false;
   }
 
-  /// ✨ NEW: Make API call using Dio (fallback to native if needed)
+  /// ✨ UPDATED: Make API call with iOS support using Dio primarily
   Future<Map<String, dynamic>?> _makeApiCall(
     String endpoint, {
     String method = 'GET',
@@ -302,8 +457,8 @@ class ESP32Client {
       return null;
     }
 
-    // Try Dio first if available and requested
-    if (useDio && _dio != null) {
+    // For iOS, always use Dio since we don't have native Android methods
+    if (Platform.isIOS || (useDio && _dio != null)) {
       try {
         Response response;
         switch (method.toUpperCase()) {
@@ -327,25 +482,44 @@ class ESP32Client {
         }
       } on DioException catch (e) {
         print('❌ Dio API $endpoint error: ${e.message}');
-        print('🔄 Falling back to native HTTP...');
-        // Fall back to native
+
+        // Only fall back to native on Android
+        if (Platform.isAndroid) {
+          print('🔄 Android: Falling back to native HTTP...');
+          return await _makeApiCallNative(endpoint, method: method, body: body);
+        } else {
+          print('❌ iOS: No native fallback available');
+          return null;
+        }
       } catch (e) {
         print('❌ Dio API $endpoint unexpected error: $e');
-        print('🔄 Falling back to native HTTP...');
-        // Fall back to native
+
+        // Only fall back to native on Android
+        if (Platform.isAndroid) {
+          print('🔄 Android: Falling back to native HTTP...');
+          return await _makeApiCallNative(endpoint, method: method, body: body);
+        } else {
+          print('❌ iOS: No native fallback available');
+          return null;
+        }
       }
     }
 
-    // Fallback to native HTTP
+    // Android-only: Fallback to native HTTP
     return await _makeApiCallNative(endpoint, method: method, body: body);
   }
 
-  /// Make authenticated API call via native HTTP (fallback method)
+  /// Make authenticated API call via native HTTP (Android fallback method only)
   Future<Map<String, dynamic>?> _makeApiCallNative(
     String endpoint, {
     String method = 'GET',
     Map<String, dynamic>? body,
   }) async {
+    if (Platform.isIOS) {
+      print('❌ Native API calls not available on iOS');
+      return null;
+    }
+
     if (!_nativeNetworkBound || baseUrl == null) {
       print('❌ Native network not bound');
       return null;
@@ -586,35 +760,51 @@ class ESP32Client {
     return response?['success'] ?? false;
   }
 
-  /// Get network debug info (using native methods)
+  /// ✨ UPDATED: Get network debug info (platform-aware)
   Future<Map<String, dynamic>> getNetworkInfo() async {
-    try {
-      final linkInfo = await EspNetworkAndroid.linkInfo();
-      final capInfo = await EspNetworkAndroid.capInfo();
-      final openPorts = await EspNetworkAndroid.scanCommonPorts(
-        ESP32_DEFAULT_IP,
-      );
-
+    if (Platform.isIOS) {
+      // iOS: Return basic connection info since we don't have native methods
       return {
-        'link': linkInfo,
-        'capabilities': capInfo,
-        'openPorts': openPorts,
+        'platform': 'iOS',
+        'connection_method': 'Direct HTTP',
+        'esp32_ip': ESP32_DEFAULT_IP,
+        'connected': isConnected,
       };
-    } catch (e) {
-      return {'error': e.toString()};
+    } else {
+      // Android: Use native methods
+      try {
+        final linkInfo = await EspNetworkAndroid.linkInfo();
+        final capInfo = await EspNetworkAndroid.capInfo();
+        final openPorts = await EspNetworkAndroid.scanCommonPorts(
+          ESP32_DEFAULT_IP,
+        );
+
+        return {
+          'platform': 'Android',
+          'link': linkInfo,
+          'capabilities': capInfo,
+          'openPorts': openPorts,
+        };
+      } catch (e) {
+        return {'platform': 'Android', 'error': e.toString()};
+      }
     }
   }
 
   /// Disconnect from ESP32
   Future<void> disconnect() async {
     isConnected = false;
-    _nativeNetworkBound = false;
     baseUrl = null;
     sessionCookie = null;
     _dio = null;
 
-    // Unbind native network
-    await EspNetworkAndroid.unbind();
-    print('🔌 Disconnected from ESP32');
+    if (Platform.isAndroid) {
+      _nativeNetworkBound = false;
+      // Unbind native network
+      await EspNetworkAndroid.unbind();
+      print('🤖 Android: Disconnected from ESP32 (native unbound)');
+    } else {
+      print('🍎 iOS: Disconnected from ESP32');
+    }
   }
 }

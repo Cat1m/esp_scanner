@@ -45,5 +45,14 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app needs location access to discover and connect to ESP32 devices via WiFi</string>
+
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app needs location access to discover and connect to ESP32 devices via WiFi</string>
+
+	<!-- Required for WiFi info access on iOS 13+ -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>This app communicates with ESP32 devices on your local network</string>
 </dict>
 </plist>
