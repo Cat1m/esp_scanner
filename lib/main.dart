@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:app_settings/app_settings.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'esp32_client.dart';
 
 void main() {
@@ -159,11 +159,7 @@ class _ESP32HomePageState extends State<ESP32HomePage> {
                 child: Text('Cancel'),
               ),
               ElevatedButton.icon(
-                onPressed: () async {
-                  await AppSettings.openAppSettingsPanel(
-                    AppSettingsPanelType.wifi,
-                  );
-                },
+                onPressed: _openSettings,
                 icon: Icon(Icons.settings, size: 16),
                 label: Text('Open WiFi Settings'),
                 style: ElevatedButton.styleFrom(
@@ -570,10 +566,12 @@ class _ESP32HomePageState extends State<ESP32HomePage> {
             // Platform-specific instructions
             if (!_isConnected && Platform.isIOS) ...[
               Container(
-                padding: EdgeInsets.all(12),
+                padding: EdgeInsets.all(
+                  16,
+                ), // Tăng padding để nội dung dễ nhìn hơn
                 decoration: BoxDecoration(
                   color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12), // Bo góc mềm mại hơn
                   border: Border.all(color: Colors.blue[200]!),
                 ),
                 child: Column(
@@ -581,41 +579,56 @@ class _ESP32HomePageState extends State<ESP32HomePage> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.info, size: 16, color: Colors.blue[700]),
-                        SizedBox(width: 4),
+                        Icon(
+                          Icons.info_outline,
+                          size: 20,
+                          color: Colors.blue[700],
+                        ),
+                        SizedBox(width: 8),
                         Text(
-                          'iOS Connection Steps:',
+                          'Hướng dẫn kết nối Wi-Fi',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.blue[700],
+                            fontSize: 16,
+                            color: Colors.blue[800],
                           ),
                         ),
                       ],
                     ),
-                    SizedBox(height: 8),
+                    SizedBox(height: 12),
                     Text(
-                      'Connect to "${ESP32Client.ESP32_SSID}" in WiFi settings, then return to this app and tap Connect',
-                      style: TextStyle(fontSize: 12, color: Colors.blue[600]),
+                      '1. Nhấn nút "Mở Cài đặt" bên dưới.',
+                      style: TextStyle(fontSize: 14, color: Colors.blue[600]),
                     ),
-                    SizedBox(height: 8),
+                    SizedBox(height: 4),
+                    Text(
+                      '2. Trong Cài đặt, chọn mục "Wi-Fi".',
+                      style: TextStyle(fontSize: 14, color: Colors.blue[600]),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '3. Kết nối với mạng Wi-Fi có tên "${ESP32Client.ESP32_SSID}".',
+                      style: TextStyle(fontSize: 14, color: Colors.blue[600]),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      '4. Quay lại ứng dụng và nhấn "Kết nối" để hoàn tất.',
+                      style: TextStyle(fontSize: 14, color: Colors.blue[600]),
+                    ),
+                    SizedBox(height: 16),
                     ElevatedButton.icon(
-                      onPressed: () async {
-                        await AppSettings.openAppSettingsPanel(
-                          AppSettingsPanelType.wifi,
-                        );
-                      },
-                      icon: Icon(Icons.settings, size: 16),
-                      label: Text('Open WiFi Settings'),
+                      onPressed: _openSettings,
+                      icon: Icon(Icons.settings, size: 20),
+                      label: Text('Mở Cài đặt'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
                         foregroundColor: Colors.white,
-                        minimumSize: Size(double.infinity, 36),
                       ),
                     ),
                   ],
                 ),
               ),
-              SizedBox(height: 16),
+              SizedBox(height: 20),
             ],
 
             // Connection buttons
@@ -923,5 +936,27 @@ class _ESP32HomePageState extends State<ESP32HomePage> {
         ),
       ),
     );
+  }
+
+  Future<void> _openSettings() async {
+    if (Platform.isIOS) {
+      // Mở cài đặt WiFi trên iOS
+      const url = 'App-Prefs:root=WIFI';
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url));
+      } else {
+        // Fallback: mở cài đặt chung
+        const fallbackUrl = 'app-settings:';
+        if (await canLaunchUrl(Uri.parse(fallbackUrl))) {
+          await launchUrl(Uri.parse(fallbackUrl));
+        }
+      }
+    } else {
+      // Android
+      const url = 'android.settings.WIFI_SETTINGS';
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url));
+      }
+    }
   }
 }
